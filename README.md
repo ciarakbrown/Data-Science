@@ -10,7 +10,8 @@ The two training sets have been sourced from the 2019 Physionet Computing in Car
 
 # Requirements
 A device with a GPU that supports CUDA 11/12 is strongly recommended. For tensorflow GPU support, a Linux device is necessary.
-Please ensure you are running a Python version between 3.9 - 3.12, as tensorflow is only compatible with these versions.
+Please ensure you are running a Python version between 3.9 - 3.12, as tensorflow is only compatible with these versions. Make sure that
+your version of pip is up to date, otherwise you run the risk of installing older incompatible packages.
 
 # Setup instructions for development
 - Clone the repository with the following command
