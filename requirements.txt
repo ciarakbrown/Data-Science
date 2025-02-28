@@ -4,3 +4,4 @@ pandas
 scikit_learn
 seaborn
 tensorflow==2.16.1
+pykalman
