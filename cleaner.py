@@ -1,6 +1,7 @@
 from pandas import DataFrame
 from pykalman import KalmanFilter
 import numpy as np
+from sklearn.impute import KNNImputer, IterativeImputer
 
 # Replace NaNs with the mean of that column that belongs to the
 # target class. May introduce bias and overfit.
@@ -35,8 +36,16 @@ def kalman_fill(df: DataFrame):
     return df_filled
 
 # Regression imputation
+def regression_fill(df: DataFrame):
+    rf = IterativeImputer()
+    df_imputed = rf.fit_transform(df)
+    return df_imputed
 
 # KNN Imputation
+def knn_fill(df: DataFrame):
+    knn = KNNImputer()
+    df_imputed = knn.fit_transform(df)
+    return df_imputed
 
 # Rolling mean
 
