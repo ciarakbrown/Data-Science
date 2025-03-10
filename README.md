@@ -9,21 +9,63 @@ This formed the [2019 Physionet Computing in Cardiology Challenge.](https://phys
 The two training sets have been sourced from the 2019 Physionet Computing in Cardiology Challenge and are freely available.
 
 # Requirements
-A device with a GPU that supports CUDA 11/12 is strongly recommended. For tensorflow GPU support, a Linux device is necessary.
-Please ensure you are running a Python version between 3.9 - 3.12, as tensorflow is only compatible with these versions. Make sure that
-your version of pip is up to date, otherwise you run the risk of installing older incompatible packages.
+- A device with a GPU that supports CUDA 11/12 is strongly recommended.
+-  A  Linux device is necessary for TensorFlow GPU support.
+Please ensure you are running a Python version between 3.9 and 3.12, as TensorFlow is only compatible with these versions.
+- Make sure that your version of pip is up to date; otherwise, you risk installing older, incompatible packages.
 
 # Setup instructions for development
 - Clone the repository with the following command
 ```
 git clone https://github.com/ciarakbrown/Data-Science.git
 ```
-- Create a virtual environment at the top-level of this project and activate it with
+- Create a virtual environment at the top-level of this project 
 ```
 python -m venv .venv
+```
+and activate it with
+```
 source .venv/bin/activate
 ```
 - Install the Python dependencies from requirements.txt
 ```
 pip install -r requirements.txt
 ```
+
+# Git assistance
+To start, clone the repository, either with an SSH key or through HTTP
+```
+git clone https://github.com/ciarakbrown/Data-Science.git
+```
+When starting development, create a new branch with
+```
+git branch branch_name
+```
+To move into this branch, use
+```
+git checkout branch_name
+```
+Alternatively, you can make a branch on GitHub and use this command to check it out locally
+```
+git switch branch_name
+```
+When you make any changes, use this to stage and commit your files to a local branch
+```
+git add .
+git commit -m "commit message"
+```
+To push your changes to GitHub
+```
+git push
+```
+Make sure you stay up to date with changes frequently to reduce conflicts
+```
+git fetch origin
+git merge origin/main
+```
+To stay up to date with your branch (say two people are working on the same branch)
+```
+git pull
+```
+When resolving merge conflicts, you can use a visual tool called GitKraken.
+
