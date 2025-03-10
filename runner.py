@@ -1,13 +1,15 @@
-import cleaner
-import loader
+import cleaner as cl
+from class_balance import get_sepsis_labels, compute_missing_data, undersample_non_sepsis, load_data
+
+
 
 # Put training set path here
-training_setA = loader.loader("/home/dipl0id/Documents/training_setA/training")
-df = training_setA[0]
-df = df.drop(columns=["EtCO2"])
-for column in df.columns:
-    loc = df.columns.get_loc(column)
-    x = cleaner.arima_kalman_imputer(df.iloc[:,loc])
-    df[column] = x
-    print(loc, " columns completed.")
-print(df)
+training_setA = load_data("/home/dipl0id/Documents/training_setA/training")
+
+# Undersample the dataset
+status = get_sepsis_labels(training_setA)
+missing_data = compute_missing_data(training_setA)
+balanced_df = undersample_non_sepsis(training_setA, status, missing_data)
+
+cleaner = cl.Cleaner("arima_kalman_cleaner", balanced_df, "EtCO2", False)
+cleaner.clean()

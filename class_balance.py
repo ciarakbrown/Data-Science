@@ -53,23 +53,7 @@ def undersample_non_sepsis(df, sepsis_status, missing_data):
     return balanced_df
 
 
-# Obtain full dataset with added patient id column
-path = '/Users/ciarabrown/Documents/DS/training'
-full_data = load_data(path)
 
-# List of patient id and either a 1 or 0
-sepsis_status = get_sepsis_labels(full_data)
-print(sepsis_status)
-
-# List of patient id and % of missing data that patient has
-missing_data = compute_missing_data(full_data)
-print(missing_data)
-
-balanced_df = undersample_non_sepsis(full_data, sepsis_status, missing_data)
-print(balanced_df)
-
-# Show class distribution after under-sampling
-print(balanced_df.groupby('patient_id')['SepsisLabel'].max().value_counts())
 
 
 # -----------------------------save the data into----------------------------------------
@@ -83,6 +67,26 @@ def save_patient_data(df, output_path):
         file_path = os.path.join(output_path, patient_id)  # Use original filename format
         patient_data.to_csv(file_path, sep='|', index=False)
 
-# Save processed data per patient
-output_path = '/Users/ciarabrown/Documents/DS/balanced_data'
-save_patient_data(balanced_df, output_path)
+
+
+if __name__ == "__main__":
+    # Obtain full dataset with added patient id column
+    path = '/Users/ciarabrown/Documents/DS/training'
+    full_data = load_data(path)
+
+    # List of patient id and either a 1 or 0
+    sepsis_status = get_sepsis_labels(full_data)
+    print(sepsis_status)
+
+    # List of patient id and % of missing data that patient has
+    missing_data = compute_missing_data(full_data)
+    print(missing_data)
+
+    balanced_df = undersample_non_sepsis(full_data, sepsis_status, missing_data)
+    print(balanced_df)
+
+    # Show class distribution after under-sampling
+    print(balanced_df.groupby('patient_id')['SepsisLabel'].max().value_counts())
+    # Save processed data per patient
+    output_path = '/Users/ciarabrown/Documents/DS/balanced_data'
+    save_patient_data(balanced_df, output_path)
