@@ -29,9 +29,11 @@ class Cleaner:
         self.cleaned_data = []
 
     def clean(self):
-        self.cleaned_data = self.patient_data.drop(columns=self.columns_to_drop)
+        initial_clean = self.patient_data.drop(columns=self.columns_to_drop)
         if (not self.global_clean):
-            self.patient_list = [df for _,df in self.cleaned_data.groupby("patient_id")]
+            self.patient_list = [df for _,df in initial_clean.groupby("patient_id")]
+            for df in self.patient_list:
+                df.drop(columns="patient_id", inplace=True)
 
         cleaner = getattr(self, self.cleaning_method)
         cleaner()
@@ -48,7 +50,7 @@ class Cleaner:
                     ts_clean,
                     seasonal=False,
                     suppress_warnings=True,
-                    stepwise=False,
+                    stepwise=True,
                     information_criterion='aicc',
                     trend='ct',
                 )
@@ -70,6 +72,17 @@ class Cleaner:
             cleaned_data.append(clean_df)
             self.cleaned_data = cleaned_data
 
+    # KNN Imputation
+    def knn_cleaner(self):
+        for patient in self.patient_list:
+            print(patient)
+            knn = KNNImputer()
+            df_imputed = knn.fit_transform(patient)
+            cleaned_data = self.cleaned_data.copy()
+            cleaned_data.append(df_imputed)
+            self.cleaned_data = cleaned_data
+
+
 
 
 
@@ -82,9 +95,6 @@ def class_mean_impute(df: DataFrame):
     df.drop(columns=nan_columns, inplace=True)
     for col in df.columns[:-1]:
         df[col] = df.groupby(target_column)[col].transform(lambda x: x.fillna(x.mean()))
-
-
-
 
 # Regression imputation
 def regression_fill(df: DataFrame):
