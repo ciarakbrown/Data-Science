@@ -41,7 +41,7 @@ def main():
     df_imputed = (
         combined_df
         .groupby('PatientID', as_index=False)
-        .apply(class_mean_impute, include_groups = True)
+        .apply(class_mean_impute, include_groups=True)
     )
 
     print(df_imputed.head())
@@ -57,14 +57,13 @@ def main():
     corr_df = pd.DataFrame(patient_corrs).T
     pval_df = pd.DataFrame(patient_pvals).T
 
-
     mean_corr = corr_df.mean(axis=0)
-    # Combine probability values using fishers method
+    # Combine probability values using Fisher's method
     combined_p = {}
     for feature in pval_df.columns:
         valid_p = pval_df[feature].dropna()
         if len(valid_p) > 0:
-            stat, p_comb = combine_pvalues(valid_p, method='fisher')
+            _, p_comb = combine_pvalues(valid_p, method='fisher')
             combined_p[feature] = p_comb
         else:
             combined_p[feature] = np.nan
@@ -74,6 +73,7 @@ def main():
         'combined_p': pd.Series(combined_p)
     })
    
+    # Avoid -inf in log10 by clipping very small p-values
     min_thresh = np.finfo(float).tiny
     result_df['neg_log10_p'] = -np.log10(result_df['combined_p'].clip(lower=min_thresh))
     result_df['abs_corr'] = result_df['mean_correlation'].abs()
@@ -82,21 +82,55 @@ def main():
     print("\nMean Point-Biserial Correlation Across Patients with Combined P-values:")
     print(result_df.head(15))
 
-    # Create volcano plot: x-axis = mean correlation, y-axis = -log10(combined p-value)
+    # ---------------------------------------------------
+    # Volcano Plot (Full Range)
+    # ---------------------------------------------------
     plt.figure(figsize=(10, 6))
     plt.scatter(result_df['mean_correlation'], result_df['neg_log10_p'], color='blue')
     plt.xlabel('Mean Point-Biserial Correlation')
     plt.ylabel('-log10(Combined P-value)')
-    plt.title('Volcano Plot: Correlation vs Statistical Significance')
+    plt.title('Volcano Plot: Correlation vs. Statistical Significance')
     
-    # Draw horizontal line for p=0.05 significance threshold
+    # Draw significance thresholds
     plt.axhline(y=-np.log10(0.05), color='red', linestyle='--', label='p=0.05')
     plt.axvline(x=0, color='grey', linestyle='--')
 
     # Annotate features on the plot
     for feature, row in result_df.iterrows():
-        plt.text(row['mean_correlation'], row['neg_log10_p'], feature, fontsize=8, ha='center', va='bottom')
+        plt.text(row['mean_correlation'], row['neg_log10_p'], feature, 
+                 fontsize=8, ha='center', va='bottom')
     
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    # ---------------------------------------------------
+    # Volcano Plot (Zoomed-In) around correlation=0
+    # ---------------------------------------------------
+    # You can adjust these x-limits and y-limits based on your data distribution
+    zoom_xmin, zoom_xmax = -0.1, 0.1
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(result_df['mean_correlation'], result_df['neg_log10_p'], color='blue')
+    plt.xlabel('Mean Point-Biserial Correlation (Zoomed)')
+    plt.ylabel('-log10(Combined P-value)')
+    plt.title('Volcano Plot (Zoomed Near Correlation=0)')
+
+    # Apply the same thresholds
+    plt.axhline(y=-np.log10(0.05), color='red', linestyle='--', label='p=0.05')
+    plt.axvline(x=0, color='grey', linestyle='--')
+
+    # Adjust x-limits (and y-limits if desired)
+    plt.xlim(zoom_xmin, zoom_xmax)
+    # Example y-limit if you want to zoom in on smaller p-values:
+    # plt.ylim(0, 3)  # adjust as needed
+
+    # Annotate features (optional, can get messy if many points overlap)
+    for feature, row in result_df.iterrows():
+        if zoom_xmin <= row['mean_correlation'] <= zoom_xmax:
+            plt.text(row['mean_correlation'], row['neg_log10_p'], feature,
+                     fontsize=8, ha='center', va='bottom')
+
     plt.legend()
     plt.tight_layout()
     plt.show()
