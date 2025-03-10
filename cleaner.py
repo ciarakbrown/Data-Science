@@ -13,11 +13,13 @@ class Cleaner:
                                 "regression_cleaner",
                                 "interpolation_cleaner",
                                 "mean_cleaner"]
-
+        self.global_cleaning_methods = ["mean_cleaner"]
 
 
         if cleaning_method not in self.cleaning_methods:
             raise ValueError(f"Not a valid cleaning method. Select from {self.cleaning_methods}")
+        if global_clean and cleaning_method not in self.global_cleaning_methods:
+            raise ValueError("global_clean set to True but a non-global cleaning method was provided.")
 
         self.cleaning_method = cleaning_method
         self.patient_data = patient_data

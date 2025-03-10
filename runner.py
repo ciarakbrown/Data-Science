@@ -5,8 +5,9 @@ from Removing_missing_features import get_high_missing_features
 
 # Read path from command line
 parser = argparse.ArgumentParser()
-parser.add_argument('filepath')
-path = parser.filepath
+parser.add_argument('filename')
+args = parser.parse_args()
+path = args.filename
 
 # Put training set path here
 training_setA = load_data(path)
