@@ -23,13 +23,11 @@ class Cleaner:
         self.patient_data = patient_data
         self.global_clean = global_clean
 
-
         self.columns_to_drop = columns_to_drop
         self.cleaned_data = []
 
     def clean(self):
         self.cleaned_data = self.patient_data.drop(columns=self.columns_to_drop)
-
         if (not self.global_clean):
             self.patient_list = [df for _,df in self.cleaned_data.groupby("patient_id")]
 

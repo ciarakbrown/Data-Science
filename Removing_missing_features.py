@@ -7,11 +7,7 @@ import pandas as pd
 import shutil
 import matplotlib.pyplot as plt
 
-# Define the correct file paths in Colab
-datasets_fixed = [
-    {"zip_path": "training_setA.zip", "extract_path": "/mnt/data/extracted_data_A", "output_zip": "/mnt/data/training_setA_cleaned.zip", "name": "Training Set A"},
-    {"zip_path": "training_setB.zip", "extract_path": "/mnt/data/extracted_data_B", "output_zip": "/mnt/data/training_setB_cleaned.zip", "name": "Training Set B"}
-]
+
 
 def extract_data_fixed(zip_path, extract_path):
     """Extracts the ZIP file and returns the correct training directory path."""
@@ -46,8 +42,8 @@ def plot_missing_data(df, dataset_name):
 
     # Plot missing data
     plt.figure(figsize=(10, 5))
-    missing_percent.plot(kind="barh", color="red")   
-    plt.axvline(x=90, color="blue", linestyle="--", linewidth=2, label="90% Missing Threshold") 
+    missing_percent.plot(kind="barh", color="red")
+    plt.axvline(x=90, color="blue", linestyle="--", linewidth=2, label="90% Missing Threshold")
     plt.xlabel("Percentage Missing")
     plt.ylabel("Features")
     plt.title(f"Missing Data Percentage per Feature - {dataset_name}")
@@ -106,9 +102,16 @@ def clean_and_save_data_fixed(original_zip_path, extract_path, output_zip_path, 
 
     print(f"✅ Cleaned dataset saved as: {output_zip_path}")
 
-# Run the complete workflow for both datasets with the corrected extraction function
-for dataset in datasets_fixed:
-    clean_and_save_data_fixed(dataset["zip_path"], dataset["extract_path"], dataset["output_zip"], dataset["name"], threshold=90, max_files=5)
 
-# Provide cleaned dataset ZIP file paths for download
-datasets_fixed[0]["output_zip"], datasets_fixed[1]["output_zip"]
+if __name__ == "__main__":
+    # Define the correct file paths in Colab
+    datasets_fixed = [
+        {"zip_path": "training_setA.zip", "extract_path": "/mnt/data/extracted_data_A", "output_zip": "/mnt/data/training_setA_cleaned.zip", "name": "Training Set A"},
+        {"zip_path": "training_setB.zip", "extract_path": "/mnt/data/extracted_data_B", "output_zip": "/mnt/data/training_setB_cleaned.zip", "name": "Training Set B"}
+    ]
+    # Run the complete workflow for both datasets with the corrected extraction function
+    for dataset in datasets_fixed:
+        clean_and_save_data_fixed(dataset["zip_path"], dataset["extract_path"], dataset["output_zip"], dataset["name"], threshold=90, max_files=5)
+
+    # Provide cleaned dataset ZIP file paths for download
+    datasets_fixed[0]["output_zip"], datasets_fixed[1]["output_zip"]
