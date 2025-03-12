@@ -206,6 +206,8 @@ def class_mean_impute(df: DataFrame):
     df.drop(columns=nan_columns, inplace=True)
     for col in df.columns[:-1]:
         df[col] = df.groupby(target_column)[col].transform(lambda x: x.fillna(x.mean()))
+        
+    return df
 
 # Regression imputation
 def regression_fill(df: DataFrame):
