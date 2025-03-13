@@ -4,110 +4,93 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Define dataset paths
-datasets_fixed = [
-    {"zip_path": "training_setA.zip", "extract_path": "extracted_data_A", "output_zip": "training_setA_cleaned.zip", "name": "Training Set A"},
-    {"zip_path": "training_setB.zip", "extract_path": "extracted_data_B", "output_zip": "training_setB_cleaned.zip", "name": "Training Set B"}
+datasets = [
+    {"zip_path": "training_setA.zip", "extract_path": "extracted_data_A", "output_zip": "training_setA_cleaned.zip", "name": "A"},
+    {"zip_path": "training_setB.zip", "extract_path": "extracted_data_B", "output_zip": "training_setB_cleaned.zip", "name": "B"}
 ]
 
-def extract_data_fixed(zip_path, extract_path):
-    """Extracts the ZIP file and returns the correct training directory path."""
+def extract_data(zip_path, extract_path):
+    """Extracts ZIP file contents."""
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_path)
 
-    # Detect extracted folders dynamically
-    extracted_folders = [name for name in os.listdir(extract_path) if os.path.isdir(os.path.join(extract_path, name))]
-    if not extracted_folders:
-        raise FileNotFoundError(f"No extracted directories found in {extract_path}")
+# Extract datasets
+for dataset in datasets:
+    extract_data(dataset["zip_path"], dataset["extract_path"])
 
-    training_path = os.path.join(extract_path, extracted_folders[0])
-    print(f"Extracted to: {training_path}")  # Debugging output
-    return training_path
+# Define paths for extracted files
+dataset_paths = {
+    "A": os.path.join("extracted_data_A", "training"),
+    "B": os.path.join("extracted_data_B", "training_setB")
+}
 
-def get_high_missing_features(df, threshold=90):
-    """Identifies features with more than `threshold`% missing data."""
-    missing_percent = df.isnull().mean() * 100
-    return missing_percent[missing_percent > threshold].index.tolist()
+def load_all_patients(dataset_path, dataset_name):
+    """Loads all patient files from a dataset folder."""
+    patient_files = [f for f in os.listdir(dataset_path) if f.endswith(".psv") or f.endswith(".csv")]
+    all_dfs = []
+    
+    for file in patient_files:
+        df = pd.read_csv(os.path.join(dataset_path, file), sep="|", low_memory=False)
+        df["Source"] = dataset_name  # Track which dataset the file belongs to
+        df["Patient_ID"] = file  # Store filename for later reassignment
+        all_dfs.append(df)
+    
+    return pd.concat(all_dfs, ignore_index=True)
 
-def plot_missing_data(df, dataset_name):
-    """Plots missing data percentage ensuring all features are included."""
-    missing_percent = df.isnull().mean() * 100
-    missing_percent = missing_percent.sort_values()
+# Load all patient data from both datasets
+df_A = load_all_patients(dataset_paths["A"], "A")
+df_B = load_all_patients(dataset_paths["B"], "B")
 
-    # Features with < 90% missing
-    features_below_threshold = missing_percent[missing_percent < 90].index.tolist()
-    print(f"\nDataset: {dataset_name}")
-    print(f"Features with <90% missing: {len(features_below_threshold)}")
+# Combine all patients into one dataframe
+combined_df = pd.concat([df_A, df_B], ignore_index=True)
 
-    # Plot missing data
-    plt.figure(figsize=(10, 5))
-    missing_percent.plot(kind="barh", color="red")
-    plt.axvline(x=90, color="blue", linestyle="--", linewidth=2, label="90% Missing Threshold")
+# Compute percentage of missing values per feature
+missing_percentage = combined_df.isnull().mean() * 100
+
+# Plot missing data percentages
+def plot_missing_data(missing_percentage):
+    """Plots missing data percentages for all features."""
+    missing_percentage = missing_percentage.sort_values()
+    
+    plt.figure(figsize=(7, 7))
+    missing_percentage.plot(kind="barh", color="red")
+    plt.axvline(x=50, color="blue", linestyle="--", linewidth=2, label="50% Missing Threshold")
     plt.xlabel("Percentage Missing")
     plt.ylabel("Features")
-    plt.title(f"Missing Data Percentage per Feature - {dataset_name}")
+    plt.title("Average Missing Data Percentage per Feature (Both A & B Patients)")
     plt.legend()
     plt.show()
 
-def clean_and_save_data_fixed(original_zip_path, extract_path, output_zip_path, dataset_name, threshold=90):
-    """Extracts patient files, removes high-missing features per dataset, and creates a new ZIP."""
+# Display the graph
+plot_missing_data(missing_percentage)
 
-    # Step 1: Extract the ZIP file
-    training_path = extract_data_fixed(original_zip_path, extract_path)
-    cleaned_path = os.path.join(extract_path, "cleaned_data")
-    os.makedirs(cleaned_path, exist_ok=True)
+# Drop features with more than 60% missing data
+missing_threshold = 50
+features_to_drop = missing_percentage[missing_percentage > missing_threshold].index.tolist()
+cleaned_df = combined_df.drop(columns=features_to_drop, errors="ignore")
 
-    # Step 2: Check if patient files exist
-    patient_files = [f for f in os.listdir(training_path) if f.endswith(".psv") or f.endswith(".csv")]
-    if not patient_files:
-        raise ValueError(f"No patient files found in {training_path}. Check if the ZIP file contains valid data.")
+# Split cleaned data back into original datasets
+cleaned_df_A = cleaned_df[cleaned_df["Source"] == "A"].drop(columns=["Source"])
+cleaned_df_B = cleaned_df[cleaned_df["Source"] == "B"].drop(columns=["Source"])
 
-    print(f"Processing {len(patient_files)} patient files for {dataset_name}...")
+# Define function to save cleaned patient files
+def save_cleaned_data(cleaned_df, dataset_path, output_zip_path):
+    """Saves cleaned patient data into files and zips them."""
+    cleaned_data_path = os.path.join(dataset_path, "cleaned_data")
+    os.makedirs(cleaned_data_path, exist_ok=True)
+    
+    for patient_id, patient_data in cleaned_df.groupby("Patient_ID"):
+        patient_file_path = os.path.join(cleaned_data_path, patient_id)
+        patient_data.drop(columns=["Patient_ID"], errors="ignore").to_csv(patient_file_path, sep="|", index=False)
 
-    # Combine all patient files for missing data analysis
-    combined_df = pd.concat(
-        [pd.read_csv(os.path.join(training_path, f), sep="|", low_memory=False) for f in patient_files],
-        ignore_index=True
-    )
-
-    # Plot missing data before cleaning
-    plot_missing_data(combined_df, dataset_name)
-
-    features_to_drop = get_high_missing_features(combined_df, threshold)
-
-    # Print the features being removed
-    print(f"\nDataset: {dataset_name}")
-    print(f"Removing {len(features_to_drop)} features with > {threshold}% missing data:")
-    print(features_to_drop)
-
-    # Step 4: Process all patient files
-    for file in patient_files:
-        file_path = os.path.join(training_path, file)
-        df = pd.read_csv(file_path, sep="|", low_memory=False)
-
-        # Drop high-missing features
-        df_cleaned = df.drop(columns=features_to_drop, errors="ignore")
-
-        # Save cleaned file
-        cleaned_file_path = os.path.join(cleaned_path, file)
-        df_cleaned.to_csv(cleaned_file_path, sep="|", index=False)
-
-    # Step 5: Create a new ZIP with cleaned data
+    # Create ZIP file with cleaned data
     with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for file in os.listdir(cleaned_path):
-            zipf.write(os.path.join(cleaned_path, file), arcname=file)
+        for file in os.listdir(cleaned_data_path):
+            zipf.write(os.path.join(cleaned_data_path, file), arcname=file)
 
-    print(f"Cleaned dataset saved as: {output_zip_path}")
+# Save cleaned datasets
+save_cleaned_data(cleaned_df_A, dataset_paths["A"], "training_setA_cleaned.zip")
+save_cleaned_data(cleaned_df_B, dataset_paths["B"], "training_setB_cleaned.zip")
 
-# Run workflow for both datasets (PROCESSING THEM THE SAME WAY)
-for dataset in datasets_fixed:
-    clean_and_save_data_fixed(
-        dataset["zip_path"],
-        dataset["extract_path"],
-        dataset["output_zip"],
-        dataset["name"],
-        threshold=90
-    )
-
-# Provide cleaned dataset ZIP file paths for download
-print(f"\nCleaned files available: {datasets_fixed[0]['output_zip']}, {datasets_fixed[1]['output_zip']}")
+print("Processing complete. Cleaned ZIP files created: training_setA_cleaned.zip, training_setB_cleaned.zip")
 
