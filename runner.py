@@ -1,16 +1,14 @@
 import cleaner as cl
-import argparse
 from class_balance import get_sepsis_labels, compute_missing_data, undersample_non_sepsis, load_data
 from Removing_missing_features import get_high_missing_features
+import os
 
 # Read path from command line
-parser = argparse.ArgumentParser()
-parser.add_argument('filename')
-args = parser.parse_args
-path = args.filename
+absolute_path = os.path.dirname(__file__)
 
 # Put training set path here
-training_setA = load_data(path)
+training_setA = os.path.join(absolute_path, "data/raw/training")
+training_setB = os.path.join(absolute_path, "data/raw/training_setB")
 
 # Undersample the dataset
 status = get_sepsis_labels(training_setA)
