@@ -31,6 +31,18 @@ source .venv/bin/activate
 ```
 pip install -r requirements.txt
 ```
+- Download the dataset
+```
+python get_data.py
+```
+- Preprocess the data
+```
+python preprocessing.py
+```
+- Run the program
+```
+python runner.py
+```
 
 # Git assistance
 To start, clone the repository, either with an SSH key or through HTTP
