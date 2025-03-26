@@ -2,7 +2,7 @@ from class_balance import save_patient_data, load_data
 import os
 import pandas as pd
 
-# Read path from command line
+# Get the current directory path
 absolute_path = os.path.dirname(__file__)
 
 # Put training set path here
@@ -44,6 +44,6 @@ save_patient_data(
     )
 
 save_patient_data(
-    setA_processed, 
+    setB_processed, 
     os.path.join(absolute_path, "data/processed/training_setB")
     )
