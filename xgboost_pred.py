@@ -28,7 +28,7 @@ def evaluate_model(y_true,y_pred):
 
 
 
-data = load_data("/home/dipl0id/Documents/cleaned_dataset")
+data = load_data("")
 data = data.drop(columns="patient_id")
 
 
