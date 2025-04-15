@@ -150,7 +150,7 @@ def run_utility_optimization_pipeline(zip_path):
     print(f"Offset: {best['Offset']} hours | Utility: {best['Utility']:.3f}")
 
     plt.figure(figsize=(5, 4))
-    sns.heatmap(best['ConfusionMatrix'], annot=True, fmt="d", cbar=False,
+    sns.heatmap(best['ConfusionMatrix'], cmap = "Blues", annot=True, fmt="d", cbar=False,
                 xticklabels=["No Sepsis", "Sepsis"],
                 yticklabels=["No Sepsis", "Sepsis"])
     plt.xlabel("Predicted")
