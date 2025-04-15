@@ -7,24 +7,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import tempfile
 import shutil
+import sys
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-from google.colab import files
 
-# Upload dataset
-print("Upload cleaned_dataset.zip")
-uploaded = files.upload()
-
-# Unzip dataset
-zip_path = "cleaned_dataset.zip"
-extract_dir = "./sepsis_dataset"
-if not os.path.exists(extract_dir):
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_dir)
-
-data_dir = os.path.join(extract_dir, "cleaned_dataset")
+# Add utils path for evaluate_sepsis_score
+sys.path.append(os.path.join(os.path.dirname(__file__), '../utils'))
+from evaluate_sepsis_score import evaluate_sepsis_score
 
 # Sliding window over patient data
 def get_sliding_windows(df_all, offset, window_size=6):
@@ -75,7 +66,6 @@ def save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_i
 
 # Evaluate RF with physionet utility function
 def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids):
-    from evaluate_sepsis_score import evaluate_sepsis_score
     label_dir, pred_dir = save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids)
     try:
         _, _, _, _, utility = evaluate_sepsis_score(label_dir, pred_dir)
@@ -86,6 +76,18 @@ def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids
 
 # Main Pipeline
 def run_pipeline():
+    zip_path = input("Please enter the full path to the cleaned_dataset.zip file: ").strip()
+
+    if not os.path.exists(zip_path):
+        print("Invalid path to cleaned_dataset.zip. Please check the location.")
+        return
+
+    extract_dir = "./sepsis_dataset"
+    if not os.path.exists(extract_dir):
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+
+    data_dir = os.path.join(extract_dir, "cleaned_dataset")
     file_paths = glob.glob(os.path.join(data_dir, "*.psv"))
 
     df_all = []
