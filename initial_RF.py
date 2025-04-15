@@ -139,7 +139,7 @@ def run_utility_optimization_pipeline(zip_path):
     plt.figure(figsize=(8, 5))
     plt.plot(results_df['Offset'], results_df['Utility'], marker='o')
     plt.title("Utility Score vs. Prediction Time Offset")
-    plt.xlabel("Hours from Diagnosis (negative = early warning)")
+    plt.xlabel("Hour of Prediction (Relative to Actual Sepsis Diagnosis")
     plt.ylabel("Utility Score")
     plt.grid(True)
     plt.tight_layout()
@@ -155,7 +155,7 @@ def run_utility_optimization_pipeline(zip_path):
                 yticklabels=["No Sepsis", "Sepsis"])
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
-    plt.title(f"Confusion Matrix (Best Overall at {best['Offset']}h)")
+    plt.title(f"Confusion Matrix for Best Prediction at {best['Offset']}h)")
     plt.tight_layout()
     plt.show()
 
