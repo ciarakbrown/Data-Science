@@ -14,8 +14,8 @@ from sklearn.model_selection import train_test_split, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 # Add utils path for evaluate_sepsis_score
-sys.path.append(os.path.join(os.path.dirname(__file__), '../utils'))
-from evaluate_sepsis_score.py import evaluate_sepsis_score.py
+sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
+from evaluate_sepsis_score import evaluate_sepsis_score
 
 # Sliding window over patient data
 def get_sliding_windows(df_all, offset, window_size=6):
