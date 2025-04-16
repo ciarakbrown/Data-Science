@@ -1,3 +1,4 @@
+import os
 import zipfile
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -5,23 +6,27 @@ from sklearn.dummy import DummyClassifier
 from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import seaborn as sns
+import sys
 
 # Path to the zip file
 zip_path = "/content/cleaned_dataset (1).zip"
 
-# Read all .psv files from the zip
+# STEP 1: Unzip and load data
 all_data = []
 with zipfile.ZipFile(zip_path, 'r') as z:
     for filename in z.namelist():
         if filename.endswith(".psv"):
             with z.open(filename) as f:
                 df = pd.read_csv(f, sep='|')
+                df["patient_id"] = os.path.basename(filename).replace(".psv", "")
                 all_data.append(df)
 
-# Combine into one DataFrame
 full_df = pd.concat(all_data, ignore_index=True)
 
-# Prepare features and labels
+# Remove SBP and DBP columns
+full_df = full_df.drop(columns=["SBP", "DBP"], errors="ignore")
+
+# STEP 2: Prepare features and labels
 X = full_df.drop(columns=["SepsisLabel", "patient_id", "index"], errors="ignore")
 y = full_df["SepsisLabel"]
 X = X.fillna(X.mean())  # Fill missing values
@@ -37,8 +42,8 @@ model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
 # Get classification report
-report = classification_report(y_test, y_pred, output_dict=True)
 print("📊 Random Baseline Model Evaluation:")
+report = classification_report(y_test, y_pred, output_dict=True)
 print(classification_report(y_test, y_pred, digits=4))
 
 # Convert report to DataFrame for plotting
@@ -62,3 +67,43 @@ disp.plot(cmap="Blues")
 plt.title("Confusion Matrix - Random Baseline")
 plt.grid(False)
 plt.show()
+
+# STEP 3: Create label and prediction folders for the prediction output
+os.makedirs("/content/labels", exist_ok=True)
+os.makedirs("/content/predictions", exist_ok=True)
+
+grouped = full_df.groupby("patient_id")
+for patient_id, group in grouped:
+    # Save label file
+    label_df = group[["SepsisLabel"]]
+    label_df.to_csv(f"/content/labels/{patient_id}.psv", sep='|', index=False)
+
+    # Prepare features
+    X_patient = group.drop(columns=["SepsisLabel", "patient_id", "index"], errors="ignore")
+    X_patient = X_patient.fillna(X.mean())
+
+    # Predict
+    probs = model.predict_proba(X_patient)[:, 1]
+    preds = model.predict(X_patient)
+
+    pred_df = pd.DataFrame({
+        "PredictedProbability": probs,
+        "PredictedLabel": preds
+    })
+    pred_df.to_csv(f"/content/predictions/{patient_id}.psv", sep='|', index=False)
+
+# STEP 4: Import and evaluate using PhysioNet evaluation script
+sys.path.append("/content")  # Add path so we can import the script
+import evaluate_sepsis_score
+
+label_path = "/content/labels"
+prediction_path = "/content/predictions"
+
+auroc, auprc, acc, f1, utility = evaluate_sepsis_score.evaluate_sepsis_score(label_path, prediction_path)
+
+print("\n📊 PhysioNet Evaluation Results:")
+print(f"AUROC: {auroc:.4f}")
+print(f"AUPRC: {auprc:.4f}")
+print(f"Accuracy: {acc:.4f}")
+print(f"F1 Score: {f1:.4f}")
+print(f"Utility Score: {utility:.4f}")
