@@ -8,3 +8,4 @@ pykalman
 statsmodels
 pmdarima
 imbalanced-learn
+scikit-optimize
