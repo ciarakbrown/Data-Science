@@ -17,56 +17,42 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from evaluate_sepsis_score import evaluate_sepsis_score
 
-# Sliding window over patient data
-def get_sliding_windows(df_all, offset, window_size=6):
-    rows = []
-    for patient_id, group in df_all.groupby("PatientID"):
-        group = group.reset_index(drop=True)
-        sepsis_indices = group.index[group["SepsisLabel"] == 1].tolist()
+# Sliding window feature extractor for time series
+WINDOW_SIZE = 6
 
-        if sepsis_indices:
-            diagnosis_time = sepsis_indices[0]
-            snapshot_time = diagnosis_time + offset
-            label = 1
-        else:
-            if len(group) + offset < 0 or len(group) < window_size:
-                continue
-            snapshot_time = len(group) + offset
-            label = 0
+# Prepare features at each hour for each patient
+def prepare_features(df_patient, window_size=6):
+    features = []
+    labels = []
+    for current_time in range(window_size - 1, len(df_patient)):
+        window = df_patient.iloc[current_time - window_size + 1:current_time + 1]
+        flat = window.mean(numeric_only=True)
+        label = df_patient.loc[current_time, "SepsisLabel"]
+        features.append(flat)
+        labels.append(label)
+    return np.array(features), np.array(labels)
 
-        start = snapshot_time - window_size + 1
-        end = snapshot_time + 1
-
-        if start < 0 or end > len(group):
-            continue
-
-        window = group.iloc[start:end].copy()
-        flat_features = window.mean(numeric_only=True)
-        flat_features["SepsisLabel"] = label
-        flat_features["PatientID"] = patient_id
-        rows.append(flat_features)
-
-    return pd.DataFrame(rows)
-
-# Formatting and saving of patient data ready for eval using utility function
-def save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids):
+# Save predictions and labels properly for PhysioNet eval
+def save_predictions_and_labels(full_labels, full_preds, full_probs, patient_ids, timesteps):
     label_dir = tempfile.mkdtemp()
     pred_dir = tempfile.mkdtemp()
 
-    for i, pid in enumerate(patient_ids):
-        df_label = pd.DataFrame({"SepsisLabel": [y_true_list[i]] * 10})
+    idx = 0
+    for pid, length in zip(patient_ids, timesteps):
+        df_label = pd.DataFrame({"SepsisLabel": full_labels[idx:idx+length]})
         df_pred = pd.DataFrame({
-            "PredictedProbability": [y_prob_list[i]] * 10,
-            "PredictedLabel": [y_pred_list[i]] * 10
+            "PredictedProbability": full_probs[idx:idx+length],
+            "PredictedLabel": full_preds[idx:idx+length]
         })
         df_label.to_csv(os.path.join(label_dir, f"{pid}.psv"), sep='|', index=False)
         df_pred.to_csv(os.path.join(pred_dir, f"{pid}.psv"), sep='|', index=False)
+        idx += length
 
     return label_dir, pred_dir
 
-# Evaluate RF with physionet utility function
-def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids):
-    label_dir, pred_dir = save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids)
+# Evaluate properly
+def compute_physionet_utility(full_labels, full_preds, full_probs, patient_ids, timesteps):
+    label_dir, pred_dir = save_predictions_and_labels(full_labels, full_preds, full_probs, patient_ids, timesteps)
     try:
         _, _, _, _, utility = evaluate_sepsis_score(label_dir, pred_dir)
     finally:
@@ -90,98 +76,81 @@ def run_pipeline():
     data_dir = os.path.join(extract_dir, "cleaned_dataset")
     file_paths = glob.glob(os.path.join(data_dir, "*.psv"))
 
-    df_all = []
+    patient_data = {}
     for path in file_paths:
         df = pd.read_csv(path, sep='|')
-        df["PatientID"] = os.path.basename(path).replace(".psv", "")
-        df_all.append(df)
-    df_all = pd.concat(df_all, ignore_index=True)
+        pid = os.path.basename(path).replace(".psv", "")
+        df["PatientID"] = pid
+        patient_data[pid] = df
 
-    print(f"Loaded {len(df_all['PatientID'].unique())} patients.")
+    print(f"Loaded {len(patient_data)} patients.")
 
-    results = []
-    best_model_data = None
+    # Create full dataset
+    X_all = []
+    y_all = []
+    patient_ids = []
+    time_lengths = []
 
-    for offset in range(-12, 0):
-        df_snap = get_sliding_windows(df_all, offset, window_size=6)
-        if df_snap.empty:
-            print(f"Offset {offset:+}: No valid windows.")
-            continue
+    for pid, df in patient_data.items():
+        if len(df) >= WINDOW_SIZE:
+            X_patient, y_patient = prepare_features(df, window_size=WINDOW_SIZE)
+            X_all.append(X_patient)
+            y_all.append(y_patient)
+            patient_ids.extend([pid]*len(y_patient))
+            time_lengths.append(len(y_patient))
 
-        X = df_snap.drop(columns=["SepsisLabel", "PatientID"])
-        y = df_snap["SepsisLabel"]
+    X_all = np.vstack(X_all)
+    y_all = np.hstack(y_all)
 
-        train_ids, test_ids = train_test_split(
-            df_snap["PatientID"].unique(),
-            test_size=0.2,
-            stratify=y,
-            random_state=42
-        )
+    # Train-test split patient wise
+    unique_ids = np.unique(patient_ids)
+    train_ids, test_ids = train_test_split(unique_ids, test_size=0.2, random_state=42)
 
-        train_mask = df_snap["PatientID"].isin(train_ids)
-        X_train, X_test = X[train_mask], X[~train_mask]
-        y_train, y_test = y[train_mask], y[~train_mask]
-        pids_test = df_snap["PatientID"][~train_mask].tolist()
+    train_mask = np.array([pid in train_ids for pid in patient_ids])
 
-        # Hyperparameter tuning 
-        param_grid = {
-            'n_estimators': [50, 100, 200],
-            'max_depth': [None, 10, 20, 30],
-            'min_samples_split': [2, 5, 10],
-            'min_samples_leaf': [1, 2, 4]
-        }
+    X_train, X_test = X_all[train_mask], X_all[~train_mask]
+    y_train, y_test = y_all[train_mask], y_all[~train_mask]
+    pids_test = np.array(patient_ids)[~train_mask]
 
-        rf = RandomForestClassifier(random_state=41)
-        search = RandomizedSearchCV(rf, param_grid, n_iter=10, cv=3, n_jobs=-1, random_state=42)
-        search.fit(X_train, y_train)
+    # Hyperparameter tuning 
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'max_depth': [None, 10, 20, 30],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4]
+    }
 
-        best_model = search.best_estimator_
-        y_probs = best_model.predict_proba(X_test)[:, 1]
-        y_pred = (y_probs > 0.4).astype(int)
+    rf = RandomForestClassifier(random_state=41)
+    search = RandomizedSearchCV(rf, param_grid, n_iter=10, cv=3, n_jobs=-1, random_state=42)
+    search.fit(X_train, y_train)
 
-        utility = compute_physionet_utility(y_test.tolist(), y_pred.tolist(), y_probs.tolist(), pids_test)
+    best_model = search.best_estimator_
+    y_probs = best_model.predict_proba(X_test)[:, 1]
+    y_pred = (y_probs > 0.4).astype(int)
 
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        f1 = f1_score(y_test, y_pred, zero_division=0)
+    # Evaluate
+    utility = compute_physionet_utility(y_test.tolist(), y_pred.tolist(), y_probs.tolist(), pids_test.tolist(), [np.sum(pids_test==pid) for pid in np.unique(pids_test)])
 
-        print(f"[{offset:+}h] Utility={utility:.3f} | Recall={rec:.3f} | Precision={prec:.3f} | Acc={acc:.3f} | F1={f1:.3f}")
-        results.append({
-            "Offset": -offset,  
-            "Utility": utility,
-            "Recall": rec,
-            "Precision": prec,
-            "Accuracy": acc,
-            "F1": f1,
-            "ConfMatrix": confusion_matrix(y_test, y_pred)
-        })
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred, zero_division=0)
+    rec = recall_score(y_test, y_pred, zero_division=0)
+    f1 = f1_score(y_test, y_pred, zero_division=0)
 
-    results_df = pd.DataFrame(results)
-    plt.figure(figsize=(8, 5))
-    plt.plot(results_df['Offset'], results_df['Utility'], marker='o')
-    plt.title("PhysioNet Utility vs. Prediction Time Offset")
-    plt.xlabel("Hours Before Diagnosis")
-    plt.ylabel("Utility Score")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    print(f"Final Utility Score: {utility:.3f}")
+    print(f"Accuracy: {acc:.3f} | Precision: {prec:.3f} | Recall: {rec:.3f} | F1 Score: {f1:.3f}")
 
-    best = results_df.loc[results_df['Utility'].idxmax()]
-    print("\nBest Offset:")
-    print(best)
-
-    # Plot confusion matrix of best offset
+    # Confusion Matrix
     plt.figure(figsize=(5, 4))
-    sns.heatmap(best['ConfMatrix'], annot=True, fmt="d", cbar=False, cmap="Blues",
+    sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt="d", cbar=False, cmap="Blues",
                 xticklabels=["No Sepsis", "Sepsis"],
                 yticklabels=["No Sepsis", "Sepsis"])
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
-    plt.title(f"Confusion Matrix (Best Offset: {best['Offset']}h Before Diagnosis)")
+    plt.title("Confusion Matrix")
     plt.tight_layout()
     plt.show()
 
-# Run code
+# Run
 if __name__ == "__main__":
     run_pipeline()
+
