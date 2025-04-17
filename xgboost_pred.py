@@ -5,6 +5,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
 from class_balance import load_data
 
 
@@ -58,6 +59,16 @@ xtrn = X_train.values
 xtst = X_test.values
 ytrn = y_train.values
 ytst = y_test.values
+
+X_train["high_hr"] = (X_train["HR"] > 90).astype(int)
+X_test["high_hr"] = (X_test["HR"] > 90).astype(int)
+
+X_train["low_sbp"] = (X_train["SBP"] < 110).astype(int)
+X_test["low_sbp"] = (X_test["SBP"] < 110).astype(int)
+
+X_train["pulse_pressure"] = X_train["SBP"] - X_train["DBP"]
+X_test["pulse_pressure"] = X_test["SBP"] - X_test["DBP"]
+
 dtrain = xgb.DMatrix(xtrn, label=ytrn)
 dtest = xgb.DMatrix(xtst, label=ytst)
 param = {
