@@ -29,10 +29,8 @@ def evaluate_model(y_true,y_pred):
 
 
 
-data = load_data("")
+data = load_data("/Users/nakkurusu/Project/Data-Science/data/cleaned_dataset")
 data = data.drop(columns="patient_id")
-
-
 
 
 
@@ -51,26 +49,8 @@ X = data_full.drop("SepsisLabel", axis=1)
 y = data_full["SepsisLabel"]
 
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+skf = StratifiedKFold(n_splits=5, shuffle=True)
 
-
-ratio = len(y_train[y_train == 0]) / len(y_train[y_train == 1])
-xtrn = X_train.values
-xtst = X_test.values
-ytrn = y_train.values
-ytst = y_test.values
-
-X_train["high_hr"] = (X_train["HR"] > 90).astype(int)
-X_test["high_hr"] = (X_test["HR"] > 90).astype(int)
-
-X_train["low_sbp"] = (X_train["SBP"] < 110).astype(int)
-X_test["low_sbp"] = (X_test["SBP"] < 110).astype(int)
-
-X_train["pulse_pressure"] = X_train["SBP"] - X_train["DBP"]
-X_test["pulse_pressure"] = X_test["SBP"] - X_test["DBP"]
-
-dtrain = xgb.DMatrix(xtrn, label=ytrn)
-dtest = xgb.DMatrix(xtst, label=ytst)
 param = {
     'max_depth': 5,
     'eta': 0.3,
@@ -78,13 +58,26 @@ param = {
     'objective': 'binary:logistic'
 }
 num_round = 100
-bst = xgb.train(param, dtrain, num_round)
-pred = bst.predict(dtest)
-prediction = []
-for i in pred:
-  if i<0.5:
-    prediction.append(0)
-  else:
-    prediction.append(1)
 
-evaluate_model(ytst, prediction)
+for fold, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+    print(f"\nFold {fold + 1}")
+    X_train_fold, X_test_fold = X.iloc[train_idx].copy(), X.iloc[test_idx].copy()
+    y_train_fold, y_test_fold = y.iloc[train_idx], y.iloc[test_idx]
+
+    X_train_fold["high_hr"] = (X_train_fold["HR"] > 90).astype(int)
+    X_test_fold["high_hr"] = (X_test_fold["HR"] > 90).astype(int)
+
+    X_train_fold["low_sbp"] = (X_train_fold["SBP"] < 110).astype(int)
+    X_test_fold["low_sbp"] = (X_test_fold["SBP"] < 110).astype(int)
+
+    X_train_fold["pulse_pressure"] = X_train_fold["SBP"] - X_train_fold["DBP"]
+    X_test_fold["pulse_pressure"] = X_test_fold["SBP"] - X_test_fold["DBP"]
+
+    dtrain = xgb.DMatrix(X_train_fold.values, label=y_train_fold.values)
+    dtest = xgb.DMatrix(X_test_fold.values, label=y_test_fold.values)
+
+    bst = xgb.train(param, dtrain, num_round)
+    pred = bst.predict(dtest)
+    prediction = [1 if i >= 0.5 else 0 for i in pred]
+
+    evaluate_model(y_test_fold.values, prediction)
