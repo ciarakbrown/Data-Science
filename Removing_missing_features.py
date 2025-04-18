@@ -21,7 +21,7 @@ def extract_data_fixed(zip_path, extract_path):
         raise FileNotFoundError(f"No extracted directories found in {extract_path}")
 
     training_path = os.path.join(extract_path, extracted_folders[0])
-    print(f"✅ Extracted to: {training_path}")  # Debugging: Print actual extracted path
+    print(f"Extracted to: {training_path}")  # Debugging: Print actual extracted path
     return training_path
 
 def get_high_missing_features(df, threshold=90):
@@ -61,7 +61,7 @@ def clean_and_save_data_fixed(original_zip_path, extract_path, output_zip_path, 
     # Step 2: Check if there are any patient files to process
     patient_files = [f for f in os.listdir(training_path) if f.endswith(".psv") or f.endswith(".csv")]
     if not patient_files:
-        raise ValueError(f"🚨 No patient files found in {training_path}. Check if the ZIP file contains valid data.")
+        raise ValueError(f" No patient files found in {training_path}. Check if the ZIP file contains valid data.")
 
     # Step 3: Determine features to drop using a subset of files
     sample_files = patient_files[:max_files]
@@ -100,7 +100,7 @@ def clean_and_save_data_fixed(original_zip_path, extract_path, output_zip_path, 
         for file in os.listdir(cleaned_path):
             zipf.write(os.path.join(cleaned_path, file), arcname=file)
 
-    print(f"✅ Cleaned dataset saved as: {output_zip_path}")
+    print(f" Cleaned dataset saved as: {output_zip_path}")
 
 
 if __name__ == "__main__":
