@@ -102,90 +102,82 @@ def run_pipeline():
 
     results = []
     offsets = range(-12, 0)
-    window_sizes = [3, 6, 9, 12]
 
     for offset in offsets:
-        for window_size in window_sizes:
-            df_snap = get_sliding_windows(df_all, offset, window_size)
-            if df_snap.empty:
-                continue
+        df_snap = get_sliding_windows(df_all, offset, window_size=6)  # initial dummy value for setup
+        if df_snap.empty:
+            continue
 
-            X = df_snap.drop(columns=["SepsisLabel", "PatientID"])
-            y = df_snap["SepsisLabel"]
-            groups = df_snap["PatientID"]
+        X = df_snap.drop(columns=["SepsisLabel", "PatientID"])
+        y = df_snap["SepsisLabel"]
+        groups = df_snap["PatientID"]
 
-            cv = GroupKFold(n_splits=5)
+        cv_outer = GroupKFold(n_splits=5)
 
-            param_space = {
-                'n_estimators': (50, 300),
-                'max_depth': (5, 50),
-                'min_samples_split': (2, 20),
-                'min_samples_leaf': (1, 10)
-            }
+        param_space = {
+            'n_estimators': (50, 300),
+            'max_depth': (5, 50),
+            'min_samples_split': (2, 20),
+            'min_samples_leaf': (1, 10),
+            'window_size': (3, 12)
+        }
+
+        def model_evaluation(window_size):
+            df_snap_local = get_sliding_windows(df_all, offset, int(window_size))
+            if df_snap_local.empty:
+                return 0
+
+            X_local = df_snap_local.drop(columns=["SepsisLabel", "PatientID"])
+            y_local = df_snap_local["SepsisLabel"]
 
             rf = RandomForestClassifier(random_state=41)
-
             search = BayesSearchCV(
                 rf,
-                param_space,
+                {k: v for k, v in param_space.items() if k != 'window_size'},
                 n_iter=20,
-                cv=cv,
+                cv=cv_outer,
                 scoring='f1',
                 n_jobs=-1,
                 random_state=42
             )
-
-            search.fit(X, y, groups=groups)
+            search.fit(X_local, y_local, groups=df_snap_local["PatientID"])
             best_model = search.best_estimator_
-
-            y_probs = best_model.predict_proba(X)[:, 1]
+            y_probs = best_model.predict_proba(X_local)[:, 1]
             y_pred = (y_probs > 0.4).astype(int)
 
             auroc, auprc, accuracy, f_measure, utility = compute_physionet_utility(
-                y.tolist(), y_pred.tolist(), y_probs.tolist(), groups.tolist())
+                y_local.tolist(), y_pred.tolist(), y_probs.tolist(), df_snap_local["PatientID"].tolist()
+            )
+            return utility
 
-            result = {
-                "Offset": -offset,
-                "WindowSize": window_size,
-                "Utility": utility,
-                "AUROC": auroc,
-                "AUPRC": auprc,
-                "Accuracy": accuracy,
-                "F1": f_measure,
-                "ConfMatrix": confusion_matrix(y, y_pred)
-            }
+        search_window = BayesSearchCV(
+            estimator=RandomForestClassifier(),
+            search_spaces={'window_size': (3, 12)},
+            n_iter=10,
+            scoring=model_evaluation,
+            cv=[(slice(None), slice(None))],
+            random_state=42
+        )
 
-            results.append(result)
-            print(f"Offset: {-offset}, Window: {window_size}, Utility: {utility:.3f}, AUROC: {auroc:.3f}, AUPRC: {auprc:.3f}")
+        search_window.fit(X, y)
+        best_window_size = int(search_window.best_params_['window_size'])
+
+        utility = model_evaluation(best_window_size)
+        result = {"Offset": -offset, "WindowSize": best_window_size, "Utility": utility}
+        results.append(result)
+        print(f"Offset: {-offset}, Best Window Size: {best_window_size}, Utility: {utility:.3f}")
 
     results_df = pd.DataFrame(results)
 
-    # Plot Utility Score vs Offset Time
     plt.figure(figsize=(8, 5))
     results_df_sorted = results_df.sort_values(by='Offset')
     plt.plot(results_df_sorted['Offset'], results_df_sorted['Utility'], marker='o')
-    plt.title("PhysioNet Utility vs. Prediction Time Offset", fontsize="16")
-    plt.xlabel("Hours Before Diagnosis", fontsize="14")
-    plt.ylabel("Utility Score", fontsize="14")
+    plt.title("PhysioNet Utility vs. Prediction Time Offset", fontsize=16)
+    plt.xlabel("Hours Before Diagnosis", fontsize=14)
+    plt.ylabel("Utility Score", fontsize=14)
     plt.grid(True)
     plt.tight_layout()
     plt.show()
 
-    best = results_df.loc[results_df['Utility'].idxmax()]
-    print("\nBest Overall Configuration:")
-    print(best)
-
-    plt.figure(figsize=(8, 5))
-    sns.heatmap(best['ConfMatrix'], annot=True, fmt="d", cbar=False, cmap="Blues",
-                xticklabels=["No Sepsis", "Sepsis"], yticklabels=["No Sepsis", "Sepsis"])
-    plt.xlabel("Predicted", fontsize="14")
-    plt.ylabel("Actual", fontsize="14")
-    plt.title(f"Confusion Matrix (Best Prediction at {best['Offset']}h Offset)", fontsize="16")
-    plt.tight_layout()
-    plt.show()
-
-
 if __name__ == "__main__":
     run_pipeline()
-
-
