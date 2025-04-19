@@ -159,33 +159,33 @@ def run_pipeline():
             print(f"Offset: {-offset}, Window: {window_size}, Utility: {utility:.3f}, AUROC: {auroc:.3f}, AUPRC: {auprc:.3f}")
 
     results_df = pd.DataFrame(results)
-    best = results_df.loc[results_df['Utility'].idxmax()]
-    print("\nBest Overall Configuration:")
-    print(best)
-
-
 
     # Plot Utility Score vs Offset Time
-    plt.figure(figsize=(7, 5))
+    plt.figure(figsize=(8, 5))
     results_df_sorted = results_df.sort_values(by='Offset')
     plt.plot(results_df_sorted['Offset'], results_df_sorted['Utility'], marker='o')
-    plt.title("PhysioNet Utility vs. Prediction Time Offset", fontsize = "16")
-    plt.xlabel("Hours Before Diagnosis", fontsize = "14")
-    plt.ylabel("Utility Score", fontsize = "14")
+    plt.title("PhysioNet Utility vs. Prediction Time Offset", fontsize="16")
+    plt.xlabel("Hours Before Diagnosis", fontsize="14")
+    plt.ylabel("Utility Score", fontsize="14")
     plt.grid(True)
     plt.tight_layout()
     plt.show()
 
+    best = results_df.loc[results_df['Utility'].idxmax()]
+    print("\nBest Overall Configuration:")
+    print(best)
 
     plt.figure(figsize=(8, 5))
     sns.heatmap(best['ConfMatrix'], annot=True, fmt="d", cbar=False, cmap="Blues",
                 xticklabels=["No Sepsis", "Sepsis"], yticklabels=["No Sepsis", "Sepsis"])
     plt.xlabel("Predicted", fontsize="14")
     plt.ylabel("Actual", fontsize="14")
-    plt.title(f"Confusion Matrix (Best Prediction at {best['Offset']}h offset)", fontsize="16")
+    plt.title(f"Confusion Matrix (Best Prediction at {best['Offset']}h Offset)", fontsize="16")
     plt.tight_layout()
     plt.show()
 
+
 if __name__ == "__main__":
     run_pipeline()
+
 
