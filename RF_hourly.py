@@ -10,12 +10,14 @@ import shutil
 import sys
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_auc_score, average_precision_score
+from sklearn.model_selection import GroupKFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from skopt import BayesSearchCV
 
 # Add utils path for evaluate_sepsis_score
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from evaluate_sepsis_score import evaluate_sepsis_score
+
 
 def get_sliding_windows(df_all, offset, window_size):
     rows = []
@@ -47,6 +49,7 @@ def get_sliding_windows(df_all, offset, window_size):
 
     return pd.DataFrame(rows)
 
+
 def save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids):
     label_dir = tempfile.mkdtemp()
     pred_dir = tempfile.mkdtemp()
@@ -62,6 +65,7 @@ def save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_i
 
     return label_dir, pred_dir
 
+
 def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids):
     label_dir, pred_dir = save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids)
     try:
@@ -69,7 +73,8 @@ def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids
     finally:
         shutil.rmtree(label_dir)
         shutil.rmtree(pred_dir)
-    return auroc, auprc, utility
+    return auroc, auprc, accuracy, f_measure, utility
+
 
 def run_pipeline():
     zip_path = input("Please enter the full path to the cleaned_dataset.zip file: ").strip()
@@ -96,51 +101,48 @@ def run_pipeline():
     print(f"Loaded {len(df_all['PatientID'].unique())} patients.")
 
     results = []
+    offsets = range(-12, 0)
+    window_sizes = [3, 6, 9, 12]
 
-    for offset in range(-12, 0):
-        best_result_for_offset = None
-
-        for window_size in [3, 6, 9, 12]:
+    for offset in offsets:
+        for window_size in window_sizes:
             df_snap = get_sliding_windows(df_all, offset, window_size)
             if df_snap.empty:
                 continue
 
             X = df_snap.drop(columns=["SepsisLabel", "PatientID"])
             y = df_snap["SepsisLabel"]
+            groups = df_snap["PatientID"]
 
-            train_ids, test_ids = train_test_split(
-                df_snap["PatientID"].unique(),
-                test_size=0.2,
-                stratify=y,
-                random_state=42
-            )
+            cv = GroupKFold(n_splits=5)
 
-            train_mask = df_snap["PatientID"].isin(train_ids)
-            X_train, X_test = X[train_mask], X[~train_mask]
-            y_train, y_test = y[train_mask], y[~train_mask]
-            pids_test = df_snap["PatientID"][~train_mask].tolist()
-
-            param_grid = {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [None, 10, 20, 30],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4]
+            param_space = {
+                'n_estimators': (50, 300),
+                'max_depth': (5, 50),
+                'min_samples_split': (2, 20),
+                'min_samples_leaf': (1, 10)
             }
 
             rf = RandomForestClassifier(random_state=41)
-            search = RandomizedSearchCV(rf, param_grid, n_iter=10, cv=3, n_jobs=-1, random_state=42)
-            search.fit(X_train, y_train)
 
+            search = BayesSearchCV(
+                rf,
+                param_space,
+                n_iter=20,
+                cv=cv,
+                scoring='f1',
+                n_jobs=-1,
+                random_state=42
+            )
+
+            search.fit(X, y, groups=groups)
             best_model = search.best_estimator_
-            y_probs = best_model.predict_proba(X_test)[:, 1]
+
+            y_probs = best_model.predict_proba(X)[:, 1]
             y_pred = (y_probs > 0.4).astype(int)
 
-            auroc, auprc, utility = compute_physionet_utility(y_test.tolist(), y_pred.tolist(), y_probs.tolist(), pids_test)
-
-            acc = accuracy_score(y_test, y_pred)
-            prec = precision_score(y_test, y_pred, zero_division=0)
-            rec = recall_score(y_test, y_pred, zero_division=0)
-            f1 = f1_score(y_test, y_pred, zero_division=0)
+            auroc, auprc, accuracy, f_measure, utility = compute_physionet_utility(
+                y.tolist(), y_pred.tolist(), y_probs.tolist(), groups.tolist())
 
             result = {
                 "Offset": -offset,
@@ -148,43 +150,40 @@ def run_pipeline():
                 "Utility": utility,
                 "AUROC": auroc,
                 "AUPRC": auprc,
-                "Recall": rec,
-                "Precision": prec,
-                "Accuracy": acc,
-                "F1": f1,
-                "ConfMatrix": confusion_matrix(y_test, y_pred)
+                "Accuracy": accuracy,
+                "F1": f_measure,
+                "ConfMatrix": confusion_matrix(y, y_pred)
             }
 
-            if (best_result_for_offset is None) or (utility > best_result_for_offset['Utility']):
-                best_result_for_offset = result
-
-        if best_result_for_offset:
-            results.append(best_result_for_offset)
+            results.append(result)
+            print(f"Offset: {-offset}, Window: {window_size}, Utility: {utility:.3f}, AUROC: {auroc:.3f}, AUPRC: {auprc:.3f}")
 
     results_df = pd.DataFrame(results)
-
-    plt.figure(figsize=(8, 5))
-    plt.plot(results_df['Offset'], results_df['Utility'], marker='o')
-    plt.title("PhysioNet Utility vs. Prediction Time Offset")
-    plt.xlabel("Hours Before Diagnosis")
-    plt.ylabel("Utility Score")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
     best = results_df.loc[results_df['Utility'].idxmax()]
     print("\nBest Overall Configuration:")
     print(best)
 
-    plt.figure(figsize=(5, 4))
-    sns.heatmap(best['ConfMatrix'], annot=True, fmt="d", cbar=False, cmap="Blues",
-                xticklabels=["No Sepsis", "Sepsis"],
-                yticklabels=["No Sepsis", "Sepsis"])
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    plt.title(f"Confusion Matrix (Best at {best['Offset']}h Before, Window {best['WindowSize']}h)")
+    # Plot Utility Score vs Offset Time
+    plt.figure(figsize=(7, 5))
+    results_df_sorted = results_df.sort_values(by='Offset')
+    plt.plot(results_df_sorted['Offset'], results_df_sorted['Utility'], marker='o')
+    plt.title("PhysioNet Utility vs. Prediction Time Offset", fontsize = "16")
+    plt.xlabel("Hours Before Diagnosis", fontsize = "14")
+    plt.ylabel("Utility Score", fontsize = "14")
+    plt.grid(True)
     plt.tight_layout()
     plt.show()
+
+
+    plt.figure(figsize=(8, 5))
+    sns.heatmap(best['ConfMatrix'], annot=True, fmt="d", cbar=False, cmap="Blues",
+                xticklabels=["No Sepsis", "Sepsis"], yticklabels=["No Sepsis", "Sepsis"])
+    plt.xlabel("Predicted", fontsize="14")
+    plt.ylabel("Actual", fontsize="14")
+    plt.title(f"Confusion Matrix (Best Prediction at {best['Offset']}h offset)", fontsize="16")
+    plt.tight_layout()
+    plt.show()
+
 
 if __name__ == "__main__":
     run_pipeline()
