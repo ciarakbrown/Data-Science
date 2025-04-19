@@ -3,7 +3,7 @@ import zipfile
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.dummy import DummyClassifier
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay,recall_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
@@ -99,11 +99,33 @@ import evaluate_sepsis_score
 label_path = "/content/labels"
 prediction_path = "/content/predictions"
 
+from sklearn.metrics import recall_score
+
+# Existing code
 auroc, auprc, acc, f1, utility = evaluate_sepsis_score.evaluate_sepsis_score(label_path, prediction_path)
 
+# Compute recall separately using full_df and the saved predictions
+all_recalls = []
+
+for patient_id, group in grouped:
+    true_labels = group["SepsisLabel"].values
+
+    pred_df = pd.read_csv(f"/content/predictions/{patient_id}.psv", sep='|')
+    preds = pred_df["PredictedLabel"].values
+
+    if len(set(true_labels)) > 1:  # Avoid division by zero errors
+        recall = recall_score(true_labels, preds)
+        all_recalls.append(recall)
+
+# Average recall over all patients
+avg_recall = sum(all_recalls) / len(all_recalls) if all_recalls else 0
+
+# Print results
 print("\n📊 PhysioNet Evaluation Results:")
 print(f"AUROC: {auroc:.4f}")
 print(f"AUPRC: {auprc:.4f}")
 print(f"Accuracy: {acc:.4f}")
 print(f"F1 Score: {f1:.4f}")
+print(f"Recall: {avg_recall:.4f}")
 print(f"Utility Score: {utility:.4f}")
+
