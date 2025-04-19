@@ -182,7 +182,7 @@ def run_pipeline():
                 yticklabels=["No Sepsis", "Sepsis"])
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
-    plt.title(f"Confusion Matrix (Best at {best['Offset']}h Before, Window {best['WindowSize']}h)")
+    plt.title(f"Confusion Matrix (Best Prediction at {best['Offset']}h Before Diagnosis)")
     plt.tight_layout()
     plt.show()
 
