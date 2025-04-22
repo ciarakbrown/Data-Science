@@ -28,8 +28,9 @@ def get_sliding_windows(df_all, offset, window_size):
         if sepsis_indices:
             diagnosis_time = sepsis_indices[0]
             snapshot_time = diagnosis_time + offset
-n            label = 1
+            label = 1
         else:
+            # For non-sepsis patients, use last timestamp + offset
             if len(group) + offset < 0 or len(group) < window_size:
                 continue
             snapshot_time = len(group) + offset
@@ -198,5 +199,3 @@ def run_pipeline():
 
 if __name__ == '__main__':
     run_pipeline()
-
-
