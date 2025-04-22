@@ -8,6 +8,7 @@ import seaborn as sns
 import tempfile
 import shutil
 import sys
+import argparse
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GroupKFold
@@ -56,7 +57,7 @@ def save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_i
     pred_dir = tempfile.mkdtemp()
 
     for i, pid in enumerate(patient_ids):
-        # replicate 10 timesteps per patient as in second script
+        # replicate 10 timesteps per patient as expected by evaluate_sepsis_score
         df_label = pd.DataFrame({"SepsisLabel": [y_true_list[i]] * 10})
         df_pred = pd.DataFrame({
             "PredictedProbability": [y_prob_list[i]] * 10,
@@ -77,9 +78,44 @@ def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids
         shutil.rmtree(pred_dir)
     return auroc, auprc, accuracy, f_measure, utility
 
+# Evaluate a single predictions file
+def evaluate_single_file(pred_file, threshold=0.4):
+    pid = os.path.basename(pred_file).replace('.psv', '')
+    df = pd.read_csv(pred_file, sep='|')
+    # Expect columns for ground truth and probability
+    if 'SepsisLabel' not in df.columns or 'PredictedProbability' not in df.columns:
+        print("Input file must contain 'SepsisLabel' and 'PredictedProbability' columns.")
+        return
+    y_true = df['SepsisLabel'].tolist()
+    y_prob = df['PredictedProbability'].tolist()
+    y_pred = (np.array(y_prob) > threshold).astype(int).tolist()
+
+    # Compute PhysioNet metrics
+    auroc, auprc, accuracy, f1_score_pn, utility = compute_physionet_utility(
+        y_true, y_pred, y_prob, [pid] * len(y_true)
+    )
+    recall = recall_score(y_true, y_pred, zero_division=0)
+
+    print(f"Utility: {utility:.3f}")
+    print(f"AUROC: {auroc:.3f}")
+    print(f"AUPRC: {auprc:.3f}")
+    print(f"Accuracy (PhysioNet): {accuracy:.3f}")
+    print(f"Recall: {recall:.3f}")
+    print(f"F1 Score (PhysioNet): {f1_score_pn:.3f}")
+
+    return {
+        'Utility': utility,
+        'AUROC': auroc,
+        'AUPRC': auprc,
+        'Accuracy': accuracy,
+        'Recall': recall,
+        'F1': f1_score_pn
+    }
+
 # Main Pipeline
-def run_pipeline():
-    zip_path = input("Please enter the full path to the cleaned_dataset.zip file: ").strip()
+ def run_pipeline(zip_path=None):
+    if zip_path is None:
+        zip_path = input("Please enter the full path to the cleaned_dataset.zip file: ").strip()
 
     if not os.path.exists(zip_path):
         print("Invalid path to cleaned_dataset.zip. Please check the location.")
@@ -159,11 +195,9 @@ def run_pipeline():
                 pid_all.extend(pid_test.tolist())
 
             # Compute metrics
-            auroc, auprc, accuracy, f1, utility = compute_physionet_utility(
+            auroc, auprc, accuracy, f1_score_pn, utility = compute_physionet_utility(
                 y_true_all, y_pred_all, y_prob_all, pid_all
             )
-
-            conf_mat = confusion_matrix(y_true_all, y_pred_all)
 
             result = {
                 'Offset': -offset,
@@ -172,8 +206,7 @@ def run_pipeline():
                 'AUROC': auroc,
                 'AUPRC': auprc,
                 'Accuracy': accuracy,
-                'F1': f1,
-                'ConfMatrix': conf_mat
+                'F1': f1_score_pn
             }
 
             # Select best window size for this offset
@@ -198,4 +231,12 @@ def run_pipeline():
     plt.show()
 
 if __name__ == '__main__':
-    run_pipeline()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--zip', dest='zip_path', help='Path to cleaned_dataset.zip file', type=str)
+    parser.add_argument('--eval-file', help='Path to a PSV predictions file to evaluate', type=str)
+    args = parser.parse_args()
+
+    if args.eval_file:
+        evaluate_single_file(args.eval_file)
+    else:
+        run_pipeline(args.zip_path)
