@@ -113,7 +113,7 @@ def evaluate_single_file(pred_file, threshold=0.4):
     }
 
 # Main Pipeline
- def run_pipeline(zip_path=None):
+def run_pipeline(zip_path=None):
     if zip_path is None:
         zip_path = input("Please enter the full path to the cleaned_dataset.zip file: ").strip()
 
@@ -240,3 +240,4 @@ if __name__ == '__main__':
         evaluate_single_file(args.eval_file)
     else:
         run_pipeline(args.zip_path)
+
