@@ -3,23 +3,25 @@ import zipfile
 import glob
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import tempfile
 import shutil
-import sys
 import argparse
+import sys
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GroupKFold
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import recall_score
 from skopt import BayesSearchCV
 
 # Add utils path for evaluate_sepsis_score
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from evaluate_sepsis_score import evaluate_sepsis_score
 
-# Function to extract sliding-window snapshots
+# Global parameters
+WINDOW_SIZE_DEFAULT = 6
+OFFSET_RANGE = range(-12, 0)
+
+# Sliding window feature extractor for a given offset
 def get_sliding_windows(df_all, offset, window_size):
     rows = []
     for patient_id, group in df_all.groupby("PatientID"):
@@ -31,7 +33,6 @@ def get_sliding_windows(df_all, offset, window_size):
             snapshot_time = diagnosis_time + offset
             label = 1
         else:
-            # For non-sepsis patients, use last timestamp + offset
             if len(group) + offset < 0 or len(group) < window_size:
                 continue
             snapshot_time = len(group) + offset
@@ -39,205 +40,126 @@ def get_sliding_windows(df_all, offset, window_size):
 
         start = snapshot_time - window_size + 1
         end = snapshot_time + 1
-
         if start < 0 or end > len(group):
             continue
 
         window = group.iloc[start:end].copy()
-        flat_features = window.mean(numeric_only=True)
-        flat_features["SepsisLabel"] = label
-        flat_features["PatientID"] = patient_id
-        rows.append(flat_features)
-
+        features = window.mean(numeric_only=True)
+        features["SepsisLabel"] = label
+        features["PatientID"] = patient_id
+        features["Hour"] = offset
+        rows.append(features)
     return pd.DataFrame(rows)
 
-# Save predictions and labels for PhysioNet evaluation
-def save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids):
+# Write temp files and call evaluate_sepsis_score
+def compute_physionet_metrics(y_true, y_pred, y_prob, patient_ids):
     label_dir = tempfile.mkdtemp()
     pred_dir = tempfile.mkdtemp()
-
-    for i, pid in enumerate(patient_ids):
-        # replicate 10 timesteps per patient as expected by evaluate_sepsis_score
-        df_label = pd.DataFrame({"SepsisLabel": [y_true_list[i]] * 10})
-        df_pred = pd.DataFrame({
-            "PredictedProbability": [y_prob_list[i]] * 10,
-            "PredictedLabel": [y_pred_list[i]] * 10
-        })
-        df_label.to_csv(os.path.join(label_dir, f"{pid}.psv"), sep='|', index=False)
-        df_pred.to_csv(os.path.join(pred_dir, f"{pid}.psv"), sep='|', index=False)
-
-    return label_dir, pred_dir
-
-# Compute utility (and other metrics) via evaluate_sepsis_score
-def compute_physionet_utility(y_true_list, y_pred_list, y_prob_list, patient_ids):
-    label_dir, pred_dir = save_predictions_and_labels(y_true_list, y_pred_list, y_prob_list, patient_ids)
     try:
-        auroc, auprc, accuracy, f_measure, utility = evaluate_sepsis_score(label_dir, pred_dir)
+        for i, pid in enumerate(patient_ids):
+            df_label = pd.DataFrame({"SepsisLabel": [y_true[i]] * 10})
+            df_pred = pd.DataFrame({
+                "PredictedProbability": [y_prob[i]] * 10,
+                "PredictedLabel": [y_pred[i]] * 10
+            })
+            df_label.to_csv(os.path.join(label_dir, f"{pid}.psv"), sep='|', index=False)
+            df_pred.to_csv(os.path.join(pred_dir, f"{pid}.psv"), sep='|', index=False)
+        auroc, auprc, accuracy, f1, utility = evaluate_sepsis_score(label_dir, pred_dir)
     finally:
         shutil.rmtree(label_dir)
         shutil.rmtree(pred_dir)
-    return auroc, auprc, accuracy, f_measure, utility
-
-# Evaluate a single predictions file
-def evaluate_single_file(pred_file, threshold=0.4):
-    pid = os.path.basename(pred_file).replace('.psv', '')
-    df = pd.read_csv(pred_file, sep='|')
-    # Expect columns for ground truth and probability
-    if 'SepsisLabel' not in df.columns or 'PredictedProbability' not in df.columns:
-        print("Input file must contain 'SepsisLabel' and 'PredictedProbability' columns.")
-        return
-    y_true = df['SepsisLabel'].tolist()
-    y_prob = df['PredictedProbability'].tolist()
-    y_pred = (np.array(y_prob) > threshold).astype(int).tolist()
-
-    # Compute PhysioNet metrics
-    auroc, auprc, accuracy, f1_score_pn, utility = compute_physionet_utility(
-        y_true, y_pred, y_prob, [pid] * len(y_true)
-    )
-    recall = recall_score(y_true, y_pred, zero_division=0)
-
-    print(f"Utility: {utility:.3f}")
-    print(f"AUROC: {auroc:.3f}")
-    print(f"AUPRC: {auprc:.3f}")
-    print(f"Accuracy (PhysioNet): {accuracy:.3f}")
-    print(f"Recall: {recall:.3f}")
-    print(f"F1 Score (PhysioNet): {f1_score_pn:.3f}")
-
     return {
         'Utility': utility,
         'AUROC': auroc,
         'AUPRC': auprc,
         'Accuracy': accuracy,
-        'Recall': recall,
-        'F1': f1_score_pn
+        'Recall': recall_score(y_true, y_pred, zero_division=0),
+        'F1': f1
     }
 
-# Main Pipeline
-def run_pipeline(zip_path=None):
-    if zip_path is None:
-        zip_path = input("Please enter the full path to the cleaned_dataset.zip file: ").strip()
-
+# Main pipeline: generate features, train model, predict and evaluate
+def run_pipeline(zip_path, window_size, threshold, output_csv):
+    # Unzip dataset
     if not os.path.exists(zip_path):
-        print("Invalid path to cleaned_dataset.zip. Please check the location.")
+        print("Invalid dataset path.")
         return
-
     extract_dir = "./sepsis_dataset"
     if not os.path.exists(extract_dir):
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            z.extractall(extract_dir)
 
+    # Load all patient data
     data_dir = os.path.join(extract_dir, "cleaned_dataset")
-    file_paths = glob.glob(os.path.join(data_dir, "*.psv"))
-
-    # Load all patient data into a single DataFrame
+    files = glob.glob(os.path.join(data_dir, "*.psv"))
     df_all = []
-    for path in file_paths:
-        df = pd.read_csv(path, sep='|')
-        df['PatientID'] = os.path.basename(path).replace('.psv', '')
+    for f in files:
+        df = pd.read_csv(f, sep='|')
+        df['PatientID'] = os.path.basename(f).replace('.psv','')
         df_all.append(df)
     df_all = pd.concat(df_all, ignore_index=True)
 
-    print(f"Loaded {df_all['PatientID'].nunique()} patients.")
+    # Build feature snapshots for all offsets
+    dfs = []
+    for offset in OFFSET_RANGE:
+        snap = get_sliding_windows(df_all, offset, window_size)
+        if not snap.empty:
+            dfs.append(snap)
+    df_snap = pd.concat(dfs, ignore_index=True)
 
-    results = []
-    offsets = range(-12, 0)
-    window_sizes = [3, 6, 9, 12]
+    # Split patients into train/test
+    pids = df_snap['PatientID'].unique()
+    train_ids, test_ids = train_test_split(pids, test_size=0.2, random_state=42)
+    train_mask = df_snap['PatientID'].isin(train_ids)
+    train_df = df_snap[train_mask]
+    test_df = df_snap[~train_mask]
 
-    for offset in offsets:
-        best_result_for_offset = None
+    X_train = train_df.drop(columns=['SepsisLabel','PatientID','Hour'])
+    y_train = train_df['SepsisLabel']
+    X_test = test_df.drop(columns=['SepsisLabel','PatientID','Hour'])
+    y_test = test_df['SepsisLabel']
 
-        for window_size in window_sizes:
-            df_snap = get_sliding_windows(df_all, offset, window_size)
-            if df_snap.empty:
-                continue
+    # Hyperparameter tuning once
+    rf = RandomForestClassifier(random_state=41)
+    param_space = {
+        'n_estimators': (50, 300),
+        'max_depth': (5, 50),
+        'min_samples_split': (2, 20),
+        'min_samples_leaf': (1, 10)
+    }
+    search = BayesSearchCV(
+        rf, param_space, n_iter=10, cv=3,
+        scoring='f1', n_jobs=-1, random_state=42
+    )
+    search.fit(X_train, y_train)
+    best_model = search.best_estimator_
 
-            X = df_snap.drop(columns=["SepsisLabel", "PatientID"])
-            y = df_snap['SepsisLabel']
-            groups = df_snap['PatientID']
+    # Predict probabilities per sample
+    y_prob = best_model.predict_proba(X_test)[:,1]
+    y_pred = (y_prob > threshold).astype(int)
 
-            cv_outer = GroupKFold(n_splits=5)
+    # Save predictions file
+    out_df = test_df[['PatientID','Hour']].copy()
+    out_df['Probability'] = y_prob
+    out_df.to_csv(output_csv, index=False)
+    print(f"Saved predictions to {output_csv}")
 
-            y_true_all, y_pred_all, y_prob_all, pid_all = [], [], [], []
+    # Compute and print metrics
+    metrics = compute_physionet_metrics(y_test.tolist(), y_pred.tolist(), y_prob.tolist(), test_df['PatientID'].tolist())
+    for k,v in metrics.items():
+        print(f"{k}: {v:.3f}")
 
-            for train_idx, test_idx in cv_outer.split(X, y, groups):
-                X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-                y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-                pid_test = groups.iloc[test_idx]
+if __name__=='__main__':
+    p = argparse.ArgumentParser()
+    p.add_argument('--zip', dest='zip_path', required=True,
+                   help='Path to cleaned_dataset.zip')
+    p.add_argument('--window-size', dest='window_size', type=int,
+                   default=WINDOW_SIZE_DEFAULT, help='Sliding window size')
+    p.add_argument('--threshold', dest='threshold', type=float,
+                   default=0.4, help='Decision threshold')
+    p.add_argument('--out', dest='output_csv', default='predictions.csv',
+                   help='Output CSV of PatientID,Hour,Probability')
+    args = p.parse_args()
 
-                rf = RandomForestClassifier(random_state=41)
+    run_pipeline(args.zip_path, args.window_size, args.threshold, args.output_csv)
 
-                # Bayesian optimization search space
-                param_space = {
-                    'n_estimators': (50, 300),
-                    'max_depth': (5, 50),
-                    'min_samples_split': (2, 20),
-                    'min_samples_leaf': (1, 10)
-                }
-
-                search = BayesSearchCV(
-                    rf,
-                    param_space,
-                    n_iter=20,
-                    cv=3,
-                    scoring='f1',
-                    n_jobs=-1,
-                    random_state=42
-                )
-                search.fit(X_train, y_train)
-
-                best_model = search.best_estimator_
-                y_probs_fold = best_model.predict_proba(X_test)[:, 1]
-                y_pred_fold = (y_probs_fold > 0.4).astype(int)
-
-                y_true_all.extend(y_test.tolist())
-                y_pred_all.extend(y_pred_fold.tolist())
-                y_prob_all.extend(y_probs_fold.tolist())
-                pid_all.extend(pid_test.tolist())
-
-            # Compute metrics
-            auroc, auprc, accuracy, f1_score_pn, utility = compute_physionet_utility(
-                y_true_all, y_pred_all, y_prob_all, pid_all
-            )
-
-            result = {
-                'Offset': -offset,
-                'WindowSize': window_size,
-                'Utility': utility,
-                'AUROC': auroc,
-                'AUPRC': auprc,
-                'Accuracy': accuracy,
-                'F1': f1_score_pn
-            }
-
-            # Select best window size for this offset
-            if (best_result_for_offset is None) or (utility > best_result_for_offset['Utility']):
-                best_result_for_offset = result
-
-        # If a best result found, record and print
-        if best_result_for_offset:
-            results.append(best_result_for_offset)
-            print(f"Offset: {best_result_for_offset['Offset']}h, Best Window Size: {best_result_for_offset['WindowSize']}h, Utility: {best_result_for_offset['Utility']:.3f}")
-
-    # Summarize and plot
-    results_df = pd.DataFrame(results)
-    plt.figure(figsize=(8, 5))
-    results_df_sorted = results_df.sort_values(by='Offset')
-    plt.plot(results_df_sorted['Offset'], results_df_sorted['Utility'], marker='o')
-    plt.title("PhysioNet Utility vs. Prediction Time Offset", fontsize=16)
-    plt.xlabel("Hours Before Diagnosis", fontsize=14)
-    plt.ylabel("Utility Score", fontsize=14)
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--zip', dest='zip_path', help='Path to cleaned_dataset.zip file', type=str)
-    parser.add_argument('--eval-file', help='Path to a PSV predictions file to evaluate', type=str)
-    args = parser.parse_args()
-
-    if args.eval_file:
-        evaluate_single_file(args.eval_file)
-    else:
-        run_pipeline(args.zip_path)
 
