@@ -17,11 +17,11 @@ from skopt import BayesSearchCV
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from evaluate_sepsis_score import evaluate_sepsis_score
 
-# Offsets used for **training** only
+# Offsets used for training snapshots only
 OFFSET_RANGE = range(-12, 0)
 
 def get_sliding_windows(df_all, offset, window_size):
-    """Build one snapshot per patient at `offset` hours before diagnosis (or last hour for controls)."""
+    """One snapshot per patient at `offset` hours before diagnosis (or last hour for controls)."""
     rows = []
     for pid, group in df_all.groupby("PatientID"):
         g = group.reset_index(drop=True)
@@ -43,16 +43,15 @@ def get_sliding_windows(df_all, offset, window_size):
     return pd.DataFrame(rows)
 
 def get_all_windows(df_all, window_size):
-    """Build one snapshot **per hour** per patient (for test‐time probability tracing)."""
+    """One snapshot per patient per hour (for test-time probability trace)."""
     rows = []
     for pid, group in df_all.groupby("PatientID"):
         g = group.reset_index(drop=True)
-        for t in range(window_size-1, len(g)):
-            w = g.iloc[t-window_size+1:t+1]
+        for t in range(window_size - 1, len(g)):
+            w = g.iloc[t - window_size + 1 : t + 1]
             feats = w.mean(numeric_only=True)
             feats["PatientID"] = pid
             feats["Hour"]      = t
-            # We’ll pull true label sequence later directly from original df
             rows.append(feats)
     return pd.DataFrame(rows)
 
@@ -61,14 +60,13 @@ def compute_physionet_metrics_multitime(df_truth, df_preds, threshold=0.5):
     df_truth: DataFrame with columns [PatientID, Hour, SepsisLabel]
     df_preds: DataFrame with columns [PatientID, Hour, Probability]
     """
-    # align and binarize
-    df_merged = pd.merge(df_truth, df_preds, on=["PatientID","Hour"])
-    df_merged["PredictedLabel"] = (df_merged["Probability"] > threshold).astype(int)
+    df = pd.merge(df_truth, df_preds, on=["PatientID","Hour"])
+    df["PredictedLabel"] = (df["Probability"] > threshold).astype(int)
 
     label_dir = tempfile.mkdtemp()
     pred_dir  = tempfile.mkdtemp()
     try:
-        for pid, grp in df_merged.groupby("PatientID"):
+        for pid, grp in df.groupby("PatientID"):
             grp.sort_values("Hour", inplace=True)
             grp[["SepsisLabel"]].to_csv(
                 os.path.join(label_dir, f"{pid}.psv"),
@@ -78,9 +76,8 @@ def compute_physionet_metrics_multitime(df_truth, df_preds, threshold=0.5):
                 os.path.join(pred_dir, f"{pid}.psv"),
                 sep="|", index=False
             )
-
         auroc, auprc, accuracy, f1, utility = evaluate_sepsis_score(label_dir, pred_dir)
-        recall = recall_score(df_merged["SepsisLabel"], df_merged["PredictedLabel"], zero_division=0)
+        recall = recall_score(df["SepsisLabel"], df["PredictedLabel"], zero_division=0)
     finally:
         shutil.rmtree(label_dir)
         shutil.rmtree(pred_dir)
@@ -94,9 +91,8 @@ def compute_physionet_metrics_multitime(df_truth, df_preds, threshold=0.5):
         'F1': f1
     }
 
-
 def run_pipeline(zip_path, window_sizes, threshold, output_dir):
-    # 1) Unzip once
+    # 1) Unzip dataset
     if not os.path.exists(zip_path):
         raise FileNotFoundError(f"{zip_path} not found")
     extract_dir = "./sepsis_dataset"
@@ -104,7 +100,7 @@ def run_pipeline(zip_path, window_sizes, threshold, output_dir):
         with zipfile.ZipFile(zip_path, 'r') as z:
             z.extractall(extract_dir)
 
-    # 2) Load raw data
+    # 2) Load all patient data
     data_dir = os.path.join(extract_dir, "cleaned_dataset")
     files = glob.glob(os.path.join(data_dir, "*.psv"))
     df_all = []
@@ -114,7 +110,7 @@ def run_pipeline(zip_path, window_sizes, threshold, output_dir):
         df_all.append(df)
     df_all = pd.concat(df_all, ignore_index=True)
 
-    # 3) Split patient IDs
+    # 3) Split patients
     pids = df_all['PatientID'].unique()
     train_ids, test_ids = train_test_split(pids, test_size=0.2, random_state=42)
 
@@ -122,27 +118,25 @@ def run_pipeline(zip_path, window_sizes, threshold, output_dir):
     best_cfg   = None
     best_model = None
 
-    # 4) Grid‐search over window_sizes for best F1
+    # 4) Search best window_size (via CV F1)
     for ws in window_sizes:
-        # build train snapshots
         snaps = []
         for off in OFFSET_RANGE:
             s = get_sliding_windows(df_all, off, ws)
             if not s.empty:
-                s["Hour"] = off  # keep hour for bookkeeping but drop later
                 snaps.append(s)
         df_snap = pd.concat(snaps, ignore_index=True)
         train_df = df_snap[df_snap['PatientID'].isin(train_ids)]
-        
-        X = train_df.drop(columns=['SepsisLabel','PatientID','Hour'])
+
+        X = train_df.drop(columns=['SepsisLabel','PatientID'])
         y = train_df['SepsisLabel']
 
         rf = RandomForestClassifier(random_state=41)
         bayes = BayesSearchCV(
             rf,
             {
-                'n_estimators':    (50, 300),
-                'max_depth':       (5, 50),
+                'n_estimators':      (50, 300),
+                'max_depth':         (5, 50),
                 'min_samples_split': (2, 20),
                 'min_samples_leaf':  (1, 10)
             },
@@ -151,49 +145,53 @@ def run_pipeline(zip_path, window_sizes, threshold, output_dir):
         )
         bayes.fit(X, y)
         mean_f1 = bayes.best_score_
-
         print(f"WS={ws:2d} → CV F1 = {mean_f1:.3f}")
+
         if mean_f1 > best_score:
             best_score = mean_f1
             best_cfg   = (ws, bayes.best_params_)
             best_model = bayes.best_estimator_
 
-    print(f"\nSelect window_size={best_cfg[0]}, params={best_cfg[1]} (CV F1={best_score:.3f})\n")
+    print(f"\nSelected window_size={best_cfg[0]}, params={best_cfg[1]} (CV F1={best_score:.3f})\n")
 
-    # 5) Build per‐hour test snapshots
-    test_all = df_all[df_all['PatientID'].isin(test_ids)]
+    # 5) Build test-time snapshots (hourly) and align features
+    test_all    = df_all[df_all['PatientID'].isin(test_ids)]
     df_test_snap = get_all_windows(test_all, best_cfg[0])
+
     X_test = df_test_snap.drop(columns=['PatientID','Hour'])
-    probs  = best_model.predict_proba(X_test)[:,1]
+    # 🔑 align columns to exactly what model saw at train time
+    X_test = X_test.reindex(columns=best_model.feature_names_in_, fill_value=0)
+
+    probs = best_model.predict_proba(X_test)[:,1]
 
     df_preds = df_test_snap[['PatientID','Hour']].copy()
     df_preds['Probability'] = probs
 
     os.makedirs(output_dir, exist_ok=True)
     df_preds.to_csv(os.path.join(output_dir, "all_patient_probs.csv"), index=False)
-    print(f"Saved hour-by-hour probabilities → {output_dir}/all_patient_probs.csv")
+    print(f"Saved probabilities → {output_dir}/all_patient_probs.csv")
 
-    # 6) Build truth frame
+    # 6) Build ground-truth per-hour
     df_truth = test_all[['PatientID','SepsisLabel']].copy()
-    # add Hour = row index
     df_truth['Hour'] = df_truth.groupby("PatientID").cumcount()
 
-    # 7) Evaluate
+    # 7) Evaluate and print all metrics
     metrics = compute_physionet_metrics_multitime(df_truth, df_preds, threshold=threshold)
-    print("=== Evaluation ===")
-    for k,v in metrics.items():
+    print("=== Evaluation Metrics ===")
+    for k, v in metrics.items():
         print(f"{k:8s}: {v:.4f}")
 
-if __name__=='__main__':
+if __name__ == '__main__':
     p = argparse.ArgumentParser()
-    p.add_argument('--zip',        dest='zip_path',    required=True,
+    p.add_argument('--zip',          dest='zip_path',    required=True,
                    help='Path to cleaned_dataset.zip')
     p.add_argument('--window-sizes', dest='window_sizes', nargs='+', type=int,
-                   default=[6, 12, 24], help='Candidate sliding window sizes to search')
-    p.add_argument('--threshold',  dest='threshold',   type=float,
-                   default=0.5, help='Positive threshold on probability')
-    p.add_argument('--out-dir',    dest='output_dir',  default='predictions',
-                   help='Directory for per-hour prediction CSVs')
+                   default=[6, 12, 24], help='Candidate sliding window sizes')
+    p.add_argument('--threshold',    dest='threshold',   type=float,
+                   default=0.5, help='Probability threshold')
+    p.add_argument('--out-dir',      dest='output_dir',  default='predictions',
+                   help='Directory for output CSVs')
     args = p.parse_args()
 
     run_pipeline(args.zip_path, args.window_sizes, args.threshold, args.output_dir)
+
