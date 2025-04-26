@@ -7,6 +7,8 @@ from sklearn.metrics import classification_report, confusion_matrix, ConfusionMa
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
+from sklearn.metrics import fbeta_score
+
 
 # Path to the zip file
 zip_path = "/content/cleaned_dataset (1).zip"
@@ -120,12 +122,15 @@ for patient_id, group in grouped:
 # Average recall over all patients
 avg_recall = sum(all_recalls) / len(all_recalls) if all_recalls else 0
 
+# Compute F2 score
+f2 = fbeta_score(y_test, y_pred, beta=2)
+
 # Print results
 print("\n📊 PhysioNet Evaluation Results:")
 print(f"AUROC: {auroc:.4f}")
 print(f"AUPRC: {auprc:.4f}")
 print(f"Accuracy: {acc:.4f}")
 print(f"F1 Score: {f1:.4f}")
+print(f"F2 Score: {f2:.4f}")
 print(f"Recall: {avg_recall:.4f}")
 print(f"Utility Score: {utility:.4f}")
-
