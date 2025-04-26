@@ -42,14 +42,19 @@ def calculate_sofa_score(row):
     if row["FiO2"] < 13.3:
         sofa_score += 4
 
-    row["SOFA"] = sofa_score
+    return sofa_score
+
+def calculate_shock_index(row):
+    return row["HR"] / row["SBP"]
 
 data = load_data("/home/dipl0id/Documents/clean_out")
+data["SOFA"] = 0
+data["SI"] = 0
 patients = [df for _,df in data.groupby("patient_id")]
 for patient in patients:
-    patient["SOFA"] = 0
     patient["SOFA"] = patient.apply(calculate_sofa_score, axis=1)
+    patient["SI"] = patient.apply(calculate_shock_index, axis=1)
 
 for patient in patients:
-    output = "home/dipl0id/Documents/clean_out_sofa" + "/" + patient["patient_id"].iloc[0]
+    output = "/home/dipl0id/Documents/clean_out_sofa" + "/" + patient["patient_id"].iloc[0]
     patient.to_csv(output, sep="|", index=False)

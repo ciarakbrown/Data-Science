@@ -9,3 +9,4 @@ statsmodels
 pmdarima
 imbalanced-learn
 scikit-optimize
+shap
